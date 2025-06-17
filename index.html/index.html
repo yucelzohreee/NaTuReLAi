@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chat Uygulaması</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f9f9f9;
+      margin: 0; padding: 0;
+      display: flex; flex-direction: column; height: 100vh;
+    }
+    #chat-container {
+      flex-grow: 1;
+      overflow-y: auto;
+      padding: 1rem;
+      background: #fff;
+      border: 1px solid #ddd;
+    }
+    .message-bubble {
+      max-width: 70%;
+      margin-bottom: 1rem;
+      padding: 0.5rem 1rem;
+      border-radius: 12px;
+      position: relative;
+      word-wrap: break-word;
+      box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
+    }
+    .user-message {
+      background: #007bff;
+      color: white;
+      align-self: flex-end;
+      border-bottom-right-radius: 0;
+    }
+    .bot-message {
+      background: #e4e6eb;
+      color: black;
+      align-self: flex-start;
+      border-bottom-left-radius: 0;
+    }
+    .time-stamp {
+      font-size: 0.7rem;
+      color: #888;
+      margin-top: 0.2rem;
+      text-align: right;
+    }
+    .bot-time-stamp {
+      text-align: left;
+    }
+    footer {
+      background: #f0f0f0;
+      padding: 1rem 0;
+      text-align: center;
+      color: #666;
+      font-size: 0.9rem;
+    }
+    #input-area {
+      display: flex;
+      padding: 0.5rem;
+      background: #fff;
+      border-top: 1px solid #ddd;
+    }
+    #message-input {
+      flex-grow: 1;
+      padding: 0.5rem;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      resize: none;
+      height: 3rem;
+    }
+    #send-button, #new-chat-btn, #mic-button {
+      margin-left: 0.5rem;
+      background: #007bff;
+      border: none;
+      color: white;
+      padding: 0 1rem;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #send-button:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+    #loading-spinner {
+      display: none;
+      margin-left: 0.5rem;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #007bff;
+      border-radius: 50%;
+      width: 18px;
+      height: 18px;
+      animation: spin 1s linear infinite;
+    }
+    .hidden {
+      display: none !important;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg);}
+      100% {transform: rotate(360deg);}
+    }
+    #style-selector {
+      margin-left: 0.5rem;
+      padding: 0.3rem 0.5rem;
+      font-size: 1rem;
+    }
+    #listening-indicator {
+      margin-left: 0.5rem;
+      color: red;
+      font-weight: bold;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="chat-container">
+    <div class="message-bubble bot-message">
+      <p>Hoş geldiniz! Sorularınızı bekliyorum.</p>
+      <div class="time-stamp bot-time-stamp" id="first-message-time"></div>
+    </div>
+  </div>
+
+  <div id="input-area">
+    <select id="style-selector" title="Yanıt Stili Seçin">
+      <option value="professional" selected>Profesyonel & Resmi</option>
+      <option value="friendly">Samimi & Arkadaşça</option>
+      <option value="funny">Esprili & Eğlenceli</option>
+      <option value="minimal">Minimalist & Direkt</option>
+    </select>
+
+    <textarea id="message-input" placeholder="Mesajınızı yazın..." rows="1"></textarea>
+
+    <button id="mic-button" title="Sesli Yazma">
+      🎤
+    </button>
+
+    <button id="send-button" title="Gönder">
+      <span id="send-text">Gönder</span>
+      <div id="loading-spinner"></div>
+    </button>
+
+    <button id="new-chat-btn" title="Yeni Sohbet Başlat">
+      ♻️
+    </button>
+  </div>
+
+  <footer>
+    &copy; 2025 naturelAİ
+  </footer>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // Format zamanı (saat:dakika)
+    function formatTime(date) {
+      return date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // İlk mesaj zamanını ayarla
+    const now = new Date();
+    const firstMessageTimeElement = document.getElementById('first-message-time');
+    if (firstMessageTimeElement) {
+      firstMessageTimeElement.textContent = formatTime(now);
+    }
+
+    const chatContainer = document.getElementById('chat-container');
+    const messageInput = document.getElementById('message-input');
+    const sendButton = document.getElementById('send-button');
+    const styleSelector = document.getElementById('style-selector');
+    const newChatButton = document.getElementById('new-chat-btn');
+    const loadingSpinner = document.getElementById('loading-spinner');
+    const sendText = document.getElementById('send-text');
+    const micButton = document.getElementById('mic-button');
+
+    const listeningIndicator = document.createElement('span');
+    listeningIndicator.id = 'listening-indicator';
+    listeningIndicator.textContent = 'Dinleniyor...';
+    micButton.insertAdjacentElement('afterend', listeningIndicator);
+
+    const ttsToggle = null; // TTS kapalı ise kullanmadım, eklenebilir.
+
+    // Geçmiş sohbeti yükle
+    const chatHistory = JSON.parse(localStorage.getItem('chatHistory') || '[]');
+
+    // Sohbeti en alta kaydır
+    function scrollToBottom() {
+      setTimeout(() => {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+      }, 10);
+    }
+
+    // Mesaj ekle
+    function addMessage(message, isUser = false, time = new Date(), saveToHistory = true) {
+      const messageElement = document.createElement('div');
+      messageElement.classList.add('message-bubble');
+      messageElement.classList.add(isUser ? 'user-message' : 'bot-message');
+      messageElement.style.alignSelf = isUser ? 'flex-end' : 'flex-start';
+
+      const messageText = document.createElement('p');
+      messageText.textContent = message;
+      messageElement.appendChild(messageText);
+
+      const timeStamp = document.createElement('div');
+      timeStamp.classList.add('time-stamp');
+      if (!isUser) timeStamp.classList.add('bot-time-stamp');
+
+      const formattedTime = (typeof time === 'string') ? time : formatTime(time);
+      timeStamp.textContent = formattedTime;
+      messageElement.appendChild(timeStamp);
+
+      chatContainer.appendChild(messageElement);
+      scrollToBottom();
+
+      if (saveToHistory) {
+        chatHistory.push({
+          message,
+          isUser,
+          time: formattedTime
+        });
+        localStorage.setItem('chatHistory', JSON.stringify(chatHistory));
+      }
+
+      // Konuşma sesi (text-to-speech)
+      if (!isUser) {
+        speakText(message);
+      }
+    }
+
+    // Geçmişi yükle
+    function loadChatHistory() {
+      // Sadece ilk mesaj hariç diğerlerini sil
+      while (chatContainer.childElementCount > 1) {
+        chatContainer.removeChild(chatContainer.lastChild);
+      }
+
+      chatHistory.forEach(item => {
+        addMessage(item.message, item.isUser, item.time, false);
+      });
+    }
+
+    // Mesaj gönder
+    async function sendMessage() {
+      const message = messageInput.value.trim();
+      const styleKey = styleSelector.value;
+      if (message === '') return;
+
+      // Disable UI
+      messageInput.disabled = true;
+      sendButton.disabled = true;
+      loadingSpinner.style.display = 'inline-block';
+      sendText.style.display = 'none';
+
+      addMessage(message, true);
+
+      try {
+        const styleMap = {
+          professional: "Profesyonel & Resmi",
+          friendly: "Samimi & Arkadaşça",
+          funny: "Esprili & Eğlenceli",
+          minimal: "Minimalist & Direkt"
+        };
+
+        const payload = {
+          userMessage: message,
+          style: styleMap[styleKey] || styleMap.professional
+        };
+
+        let loopId;
+        if (styleKey === 'funny') {
+          loopId = 'fac2e317-e352-42a8-930c-552123d6499e';
+        } else if (styleKey === 'friendly') {
+          loopId = 'e0a0519e-409e-4ff8-bfba-4a5a5261217c';
+        } else {
+          loopId = '5057b32c-ea45-418d-8e45-37270c15289f';
+        }
+
+        const response = await fetch(
+          `https://magicloops.dev/api/loop/${loopId}/run`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          }
+        );
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const { reply } = await response.json();
+
+        addMessage(reply);
+      } catch (error) {
+        console.error('Error calling TurkishStyleReply Loop:', error);
+        addMessage("Üzgünüm, bir hata oluştu. Lütfen daha sonra tekrar deneyin.");
+      } finally {
+        messageInput.disabled = false;
+        sendButton.disabled = false;
+        loadingSpinner.style.display = 'none';
+        sendText.style.display = 'inline';
+        messageInput.value = '';
+        messageInput.focus();
+      }
+    }
+
+    // Text to Speech (Konuşma)
+    const speechSynthesis = window.speechSynthesis;
+
+    function speakText(text) {
+      if (!speechSynthesis) return;
+
+      speechSynthesis.cancel();
+
+      // Eğer TTS özelliği kapalıysa, burada açık değilse konuşmayı kapatabilirsiniz
+      // Ben ttsToggle yok diye hep kapalı yaptım.
+      // Eğer aktif istersen toggle eklenebilir.
+      // if (!ttsToggle.checked) return;
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'tr-TR';
+
+      const voices = speechSynthesis.getVoices();
+      const turkishVoice = voices.find(voice => voice.lang.includes('tr-TR'));
+      if (turkishVoice) {
+        utterance.voice = turkishVoice;
+      }
+
+      speechSynthesis.speak(utterance);
+    }
+
+    // Speech Recognition (Sesle yazma)
+    let recognition = null;
+    if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+      recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+      recognition.lang = 'tr-TR';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+    }
+
+    function startListening() {
+      if (!recognition) {
+        alert('Tarayıcınız ses tanıma özelliğini desteklemiyor.');
+        return;
+      }
+
+      micButton.style.display = 'none';
+      listeningIndicator.style.display = 'inline';
+
+      recognition.start();
+    }
+
+    function stopListening() {
+      if (!recognition) return;
+
+      micButton.style.display = 'inline-block';
+      listeningIndicator.style.display = 'none';
+
+      recognition.stop();
+    }
+
+    if (recognition) {
+      recognition.onresult = function(event) {
+        const transcript = event.results[0][0].transcript;
+        messageInput.value = transcript;
+      };
+
+      recognition.onend = function() {
+        stopListening();
+      };
+
+      recognition.onerror = function(event) {
+        console.error('Speech recognition error:', event.error);
+        stopListening();
+      };
+
+      micButton.addEventListener('click', function() {
+        if (listeningIndicator.style.display === 'none' || listeningIndicator.style.display === '') {
+          startListening();
+        } else {
+          stopListening();
+        }
+      });
+    } else {
+      micButton.style.display = 'none';
+    }
+
+    // Event Listeners
+    sendButton.addEventListener('click', function(e) {
+      e.preventDefault();
+      sendMessage();
+    });
+
+    messageInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    newChatButton.addEventListener('click', function() {
+      localStorage.removeItem('chatHistory');
+      chatHistory.length = 0;
+
+      while (chatContainer.childElementCount > 1) {
+        chatContainer.removeChild(chatContainer.lastChild);
+      }
+
+      // İlk mesaj zamanını güncelle
+      const now = new Date();
+      if (firstMessageTimeElement) {
+        firstMessageTimeElement.textContent = formatTime(now);
+      }
+
+      messageInput.value = '';
+      styleSelector.value = 'professional';
+      scrollToBottom();
+    });
+
+    window.addEventListener('resize', scrollToBottom);
+    messageInput.addEventListener('focus', () => setTimeout(scrollToBottom, 300));
+
+    // Sayfa yüklenince geçmişi yükle ve scroll yap
+    loadChatHistory();
+    scrollToBottom();
+  });
+</script>
+</body>
+</html>
